@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Community Board — ข้อมูลชุมชน</title>
+  <style>
+    :root{--bg:#f7f8fb;--card:#ffffff;--muted:#6b7280;--accent:#2563eb}
+    *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans Thai',sans-serif}
+    body{margin:0;background:var(--bg);color:#111}
+    header{background:linear-gradient(90deg,#0ea5e9 0%,#6366f1 100%);color:white;padding:28px 16px}
+    .container{max-width:980px;margin:20px auto;padding:0 16px}
+    h1{margin:0;font-size:20px}
+    p.lead{margin:6px 0 0;opacity:.95}
+
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+    .controls input[type=text], .controls select{padding:10px;border-radius:8px;border:1px solid #e6e9ef;background:white;min-width:180px}
+    .btn{background:var(--accent);color:white;padding:10px 12px;border-radius:8px;border:none;cursor:pointer}
+    .btn.secondary{background:#10b981}
+
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:18px}
+    .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(12,15,30,0.06)}
+    .meta{font-size:12px;color:var(--muted);margin-bottom:8px}
+    .title{font-weight:600;margin:0 0 8px}
+    .desc{margin:0 0 10px;color:#374151}
+    .tags{display:flex;gap:8px;flex-wrap:wrap}
+    .tag{font-size:12px;padding:6px 8px;border-radius:999px;background:#f1f5f9;color:#0f172a}
+
+    .empty{padding:28px;text-align:center;color:var(--muted)}
+    footer{max-width:980px;margin:36px auto 80px;padding:0 16px;color:var(--muted);font-size:13px}
+
+    /* modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,0.5);display:flex;align-items:center;justify-content:center;padding:24px;z-index:40}
+    .modal{background:var(--card);width:100%;max-width:720px;border-radius:12px;padding:18px}
+    .form-row{display:flex;gap:10px;margin-bottom:10px}
+    .form-row input, .form-row textarea, .form-row select{flex:1;padding:10px;border-radius:8px;border:1px solid #e6e9ef}
+    textarea{min-height:100px;resize:vertical}
+
+    @media (max-width:640px){.controls{flex-direction:column}.form-row{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Community Board — ข้อมูลชุมชน</h1>
+      <p class="lead">รวมข่าวสาร ประกาศ และทรัพยากรสำหรับคนในชุมชนของคุณ — ค้นหาและเพิ่มประกาศได้ง่าย ๆ</p>
+    </div>
+  </header>
+
+  <main class="container" id="app">
+    <section class="controls">
+      <input id="search" type="text" placeholder="ค้นหา (ชื่อเรื่อง หรือ รายละเอียด)..." />
+      <select id="categoryFilter">
+        <option value="">ทุกหมวด</option>
+      </select>
+      <button class="btn" id="newBtn">เพิ่มประกาศใหม่</button>
+      <button class="btn secondary" id="resetBtn">รีเซ็ตข้อมูลตัวอย่าง</button>
+    </section>
+
+    <section id="list" class="grid" aria-live="polite"></section>
+    <div id="empty" class="empty" style="display:none">ยังไม่มีประกาศ — ลองกด "เพิ่มประกาศใหม่" หรือกดรีเซ็ตเพื่อนำข้อมูลตัวอย่างกลับมา</div>
+  </main>
+
+  <footer>ระบบตัวอย่าง — ข้อมูลจะเก็บในเบราว์เซอร์ (localStorage). ถ้าต้องการให้เป็นเว็บไซต์จริง ต้องเชื่อมต่อฐานข้อมูล/Backend เช่น Firebase หรือ server ของคุณ</footer>
+
+  <!-- Modal form (hidden by default) -->
+  <template id="modalTpl">
+    <div class="modal-backdrop">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3 id="modalTitle">เพิ่มประกาศ</h3>
+        <div class="form-row">
+          <input id="postTitle" placeholder="หัวข้อประกาศ (จำเป็น)" />
+          <select id="postCategory">
+            <option value="บริการ">บริการ</option>
+            <option value="ประกาศ">ประกาศ</option>
+            <option value="กิจกรรม">กิจกรรม</option>
+            <option value="ทรัพยากร">ทรัพยากร</option>
+            <option value="อื่นๆ">อื่นๆ</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <textarea id="postDesc" placeholder="รายละเอียดประกาศ... (จำเป็น)"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+          <button class="btn" id="savePostBtn">บันทึก</button>
+          <button class="btn secondary" id="cancelPostBtn">ยกเลิก</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    // --- Simple client-side Community Board ---
+    const STORAGE_KEY = 'community_board_data_v1';
+
+    const sampleData = [
+      {id: genId(), title: 'ตลาดนัดชุมชนวันเสาร์', category: 'กิจกรรม', desc: 'เชิญชวนพ่อค้าแม่ค้านำสินค้ามาขาย เริ่ม 07:00 น. ที่ลานสุขภาพ'},
+      {id: genId(), title: 'บริการตัดผมฟรีสำหรับผู้สูงอายุ', category: 'บริการ', desc: 'สัปดาห์ที่ 2 ของเดือน บริการโดยอาสาสมัคร ติดต่อ 089-xxx-xxxx'},
+      {id: genId(), title: 'ประกาศหยุดน้ำชั่วคราว', category: 'ประกาศ', desc: '09 พ.ย. 2025 เวลา 09:00-16:00 เนื่องจากซ่อมท่อ'},
+      {id: genId(), title: 'ห้องสมุดชุมชนเปิดรับอาสาสมัคร', category: 'ทรัพยากร', desc: 'ช่วยจัดหนังสือและสอนการอ่านให้เด็กๆ ติดต่อคุณสุมิตรา'},
+    ];
+
+    // DOM
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('empty');
+    const searchEl = document.getElementById('search');
+    const categoryFilterEl = document.getElementById('categoryFilter');
+    const newBtn = document.getElementById('newBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    // Init
+    let data = loadData();
+    renderCategories();
+    renderList();
+
+    // Events
+    searchEl.addEventListener('input', renderList);
+    categoryFilterEl.addEventListener('change', renderList);
+    newBtn.addEventListener('click', openModal);
+    resetBtn.addEventListener('click', () => { if(confirm('นำข้อมูลตัวอย่างกลับมาใช่หรือไม่?')){ data = sampleData.slice(); saveData(); renderCategories(); renderList(); } });
+
+    function genId(){ return 'id-'+Math.random().toString(36).slice(2,9); }
+
+    function loadData(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) { localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData)); return sampleData.slice(); }
+        return JSON.parse(raw);
+      }catch(e){ console.error(e); return sampleData.slice(); }
+    }
+
+    function saveData(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+    function renderCategories(){
+      const cats = Array.from(new Set(data.map(d=>d.category))).sort();
+      categoryFilterEl.innerHTML = '<option value="">ทุกหมวด</option>' + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    }
+
+    function renderList(){
+      const q = searchEl.value.trim().toLowerCase();
+      const cat = categoryFilterEl.value;
+      const filtered = data.filter(item => {
+        const matchQ = q === '' || item.title.toLowerCase().includes(q) || item.desc.toLowerCase().includes(q);
+        const matchC = cat === '' || item.category === cat;
+        return matchQ && matchC;
+      });
+
+      listEl.innerHTML = '';
+      if(filtered.length === 0){ emptyEl.style.display='block'; return; } else { emptyEl.style.display='none'; }
+
+      filtered.forEach(item => {
+        const card = document.createElement('article');
+        card.className='card';
+        card.innerHTML = `
+          <div class="meta">${new Date().toLocaleDateString('th-TH')} • ${escapeHtml(item.category)}</div>
+          <h3 class="title">${escapeHtml(item.title)}</h3>
+          <p class="desc">${escapeHtml(item.desc)}</p>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+            <button data-id="${item.id}" class="btn" onclick="viewItem('${item.id}')">ดู</button>
+            <button data-id="${item.id}" class="btn secondary" onclick="deleteItem('${item.id}')">ลบ</button>
+          </div>
+        `;
+        listEl.appendChild(card);
+      });
+    }
+
+    // expose view/delete globally for inline onclick
+    window.viewItem = function(id){
+      const item = data.find(d=>d.id===id);
+      if(!item) return alert('ไม่พบประกาศ');
+      alert(item.title + '\n\n' + item.desc);
+    }
+
+    window.deleteItem = function(id){
+      if(!confirm('ยืนยันการลบประกาศนี้?')) return;
+      data = data.filter(d=>d.id!==id);
+      saveData(); renderCategories(); renderList();
+    }
+
+    // Modal
+    function openModal(){
+      const tpl = document.getElementById('modalTpl');
+      const node = tpl.content.cloneNode(true);
+      document.body.appendChild(node);
+      const modalBackdrop = document.querySelector('.modal-backdrop');
+      const saveBtn = document.getElementById('savePostBtn');
+      const cancelBtn = document.getElementById('cancelPostBtn');
+
+      cancelBtn.addEventListener('click', () => { modalBackdrop.remove(); });
+      saveBtn.addEventListener('click', () => {
+        const title = document.getElementById('postTitle').value.trim();
+        const desc = document.getElementById('postDesc').value.trim();
+        const category = document.getElementById('postCategory').value;
+        if(!title||!desc) return alert('กรุณากรอกหัวข้อและรายละเอียด');
+        const newItem = {id: genId(), title, desc, category};
+        data.unshift(newItem);
+        saveData(); renderCategories(); renderList(); modalBackdrop.remove();
+      });
+    }
+
+    // helpers
+    function escapeHtml(s){ return (s+'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  </script>
+</body>
+</html>
